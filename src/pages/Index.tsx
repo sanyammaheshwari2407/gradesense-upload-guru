@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 
 const Index = () => {
   const navigate = useNavigate();
@@ -13,6 +14,8 @@ const Index = () => {
   const [answerSheet, setAnswerSheet] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [showFeedback, setShowFeedback] = useState(false);
 
   useEffect(() => {
     checkUser();
@@ -119,6 +122,22 @@ const Index = () => {
 
       console.log("Grading response received:", gradingResponse);
 
+      // Fetch the updated session to get the feedback
+      const { data: updatedSession, error: fetchError } = await supabase
+        .from('grading_sessions')
+        .select('feedback')
+        .eq('id', session.id)
+        .single();
+
+      if (fetchError) {
+        throw fetchError;
+      }
+
+      if (updatedSession?.feedback) {
+        setFeedback(updatedSession.feedback);
+        setShowFeedback(true);
+      }
+
       toast({
         title: "Grading completed",
         description: "Your files have been processed successfully.",
@@ -158,6 +177,24 @@ const Index = () => {
             Upload your files below to start grading
           </p>
         </div>
+
+        {showFeedback && feedback && (
+          <Alert className="mb-8">
+            <AlertTitle>Grading Feedback</AlertTitle>
+            <AlertDescription>
+              <div className="mt-2 space-y-2">
+                {feedback.split('\n').map((point, index) => (
+                  point.trim() && (
+                    <div key={index} className="flex items-start">
+                      <span className="mr-2">•</span>
+                      <p>{point.trim()}</p>
+                    </div>
+                  )
+                ))}
+              </div>
+            </AlertDescription>
+          </Alert>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-6 bg-white p-8 rounded-xl shadow-sm">
           <FileUpload

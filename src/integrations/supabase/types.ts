@@ -13,6 +13,7 @@ export type Database = {
         Row: {
           answer_sheet_path: string
           created_at: string
+          feedback: string | null
           grading_rubric_path: string
           id: string
           question_paper_path: string
@@ -23,6 +24,7 @@ export type Database = {
         Insert: {
           answer_sheet_path: string
           created_at?: string
+          feedback?: string | null
           grading_rubric_path: string
           id?: string
           question_paper_path: string
@@ -33,6 +35,7 @@ export type Database = {
         Update: {
           answer_sheet_path?: string
           created_at?: string
+          feedback?: string | null
           grading_rubric_path?: string
           id?: string
           question_paper_path?: string

@@ -47,7 +47,6 @@ serve(async (req) => {
 
     // Convert to base64 in chunks
     const chunks = []
-    const reader = new FileReader()
     const buffer = await answerSheetData.arrayBuffer()
     
     for (let i = 0; i < buffer.byteLength; i += CHUNK_SIZE) {

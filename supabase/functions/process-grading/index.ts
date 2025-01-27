@@ -6,9 +6,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const MAX_PAGES = 3; // MVP: Limit to first 3 pages
-const CHUNK_SIZE = 1000000; // 1MB chunks for processing
-
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
@@ -35,7 +32,7 @@ serve(async (req) => {
       throw new Error(`Session not found: ${sessionError.message}`)
     }
 
-    // Download and process answer sheet first
+    // Download answer sheet
     console.log('Downloading answer sheet...')
     const { data: answerSheetData, error: downloadError } = await supabase.storage
       .from('answer_sheets')
@@ -45,54 +42,9 @@ serve(async (req) => {
       throw new Error('Failed to download answer sheet')
     }
 
-    // Convert to base64 in chunks
-    const chunks = []
-    const buffer = await answerSheetData.arrayBuffer()
-    
-    for (let i = 0; i < buffer.byteLength; i += CHUNK_SIZE) {
-      const chunk = buffer.slice(i, i + CHUNK_SIZE)
-      const base64Chunk = btoa(String.fromCharCode(...new Uint8Array(chunk)))
-      chunks.push(base64Chunk)
-    }
-
-    // Process chunks with Vision API
-    console.log('Processing with Vision API...')
-    let extractedText = ''
-    
-    for (const chunk of chunks) {
-      const visionResponse = await fetch(
-        `https://vision.googleapis.com/v1/images:annotate?key=${Deno.env.get('GOOGLE_VISION_API_KEY')}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            requests: [{
-              image: { content: chunk },
-              features: [{ type: 'DOCUMENT_TEXT_DETECTION' }]
-            }]
-          })
-        }
-      )
-
-      const visionData = await visionResponse.json()
-      if (visionData.responses?.[0]?.fullTextAnnotation?.text) {
-        extractedText += visionData.responses[0].fullTextAnnotation.text + '\n'
-      }
-    }
-
-    // Process question paper and rubric (MVP: basic text extraction)
-    console.log('Processing question paper and rubric...')
-    const [questionPaper, gradingRubric] = await Promise.all([
-      supabase.storage.from('question_papers').download(session.question_paper_path),
-      supabase.storage.from('grading_rubrics').download(session.grading_rubric_path)
-    ])
-
-    if (!questionPaper.data || !gradingRubric.data) {
-      throw new Error('Failed to download question paper or rubric')
-    }
-
-    const questionPaperText = await questionPaper.data.text()
-    const gradingRubricText = await gradingRubric.data.text()
+    // Convert to text
+    const text = await answerSheetData.text()
+    console.log('Answer sheet text extracted')
 
     // Process with Gemini API
     console.log('Processing with Gemini API...')
@@ -107,22 +59,15 @@ serve(async (req) => {
         body: JSON.stringify({
           contents: [{
             parts: [{
-              text: `You are a grading assistant. Please grade the following student answer based on the question paper and grading rubric. 
-              Provide a simplified MVP grading with scores and brief feedback.
-              
-              Question Paper:
-              ${questionPaperText.substring(0, 1000)} // MVP: Limit text length
-              
-              Grading Rubric:
-              ${gradingRubricText.substring(0, 1000)} // MVP: Limit text length
+              text: `You are a grading assistant. Please analyze this student's answer and provide feedback:
               
               Student Answer:
-              ${extractedText.substring(0, 1000)} // MVP: Limit text length
+              ${text.substring(0, 1000)} // Limit text length for MVP
               
               Please provide:
-              1. Score (out of 100)
-              2. Brief feedback (2-3 sentences)
-              3. Key areas for improvement`
+              1. Brief feedback (2-3 sentences)
+              2. Key areas for improvement
+              3. Overall score (out of 100)`
             }]
           }]
         })

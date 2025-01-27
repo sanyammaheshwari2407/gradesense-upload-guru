@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { FileUpload } from "@/components/FileUpload";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
@@ -6,10 +7,30 @@ import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 
 const Index = () => {
+  const navigate = useNavigate();
   const [questionPaper, setQuestionPaper] = useState<File | null>(null);
   const [gradingRubric, setGradingRubric] = useState<File | null>(null);
   const [answerSheet, setAnswerSheet] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    checkUser();
+  }, []);
+
+  const checkUser = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        navigate('/auth');
+      }
+    } catch (error) {
+      console.error('Error checking auth status:', error);
+      navigate('/auth');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const uploadFile = async (file: File, bucket: string) => {
     const fileExt = file.name.split('.').pop();
@@ -46,21 +67,15 @@ const Index = () => {
     setIsProcessing(true);
     
     try {
-      // Check if user is authenticated
       const { data: { user } } = await supabase.auth.getUser();
       
       if (!user) {
-        toast({
-          title: "Authentication required",
-          description: "Please log in to process files.",
-          variant: "destructive",
-        });
+        navigate('/auth');
         return;
       }
 
       console.log("Starting file uploads...");
       
-      // Upload files to respective buckets
       const [questionPaperPath, gradingRubricPath, answerSheetPath] = await Promise.all([
         uploadFile(questionPaper, 'question_papers'),
         uploadFile(gradingRubric, 'grading_rubrics'),
@@ -69,7 +84,6 @@ const Index = () => {
 
       console.log("Files uploaded successfully, creating grading session...");
       
-      // Create grading session
       const { data: session, error: sessionError } = await supabase
         .from('grading_sessions')
         .insert({
@@ -93,7 +107,6 @@ const Index = () => {
 
       console.log("Grading session created successfully:", session);
 
-      // Start processing
       const { error: processingError } = await supabase.functions
         .invoke('process-grading', {
           body: { sessionId: session.id },
@@ -125,6 +138,14 @@ const Index = () => {
       setIsProcessing(false);
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <p>Loading...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">

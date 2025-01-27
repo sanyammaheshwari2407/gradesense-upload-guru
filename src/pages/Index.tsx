@@ -2,13 +2,30 @@ import { useState } from "react";
 import { FileUpload } from "@/components/FileUpload";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
+import { supabase } from "@/integrations/supabase/client";
 
 const Index = () => {
   const [questionPaper, setQuestionPaper] = useState<File | null>(null);
   const [gradingRubric, setGradingRubric] = useState<File | null>(null);
   const [answerSheet, setAnswerSheet] = useState<File | null>(null);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const uploadFile = async (file: File, bucket: string) => {
+    const fileExt = file.name.split('.').pop();
+    const filePath = `${crypto.randomUUID()}.${fileExt}`;
+    
+    const { error: uploadError } = await supabase.storage
+      .from(bucket)
+      .upload(filePath, file);
+
+    if (uploadError) {
+      throw new Error(`Error uploading ${bucket}: ${uploadError.message}`);
+    }
+
+    return filePath;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!questionPaper || !gradingRubric || !answerSheet) {
@@ -20,17 +37,57 @@ const Index = () => {
       return;
     }
 
-    toast({
-      title: "Files uploaded successfully",
-      description: "Your files are being processed. This may take a moment.",
-    });
+    setIsProcessing(true);
     
-    // Here you would typically send the files to your backend
-    console.log("Processing files:", {
-      questionPaper,
-      gradingRubric,
-      answerSheet,
-    });
+    try {
+      // Upload files to respective buckets
+      const [questionPaperPath, gradingRubricPath, answerSheetPath] = await Promise.all([
+        uploadFile(questionPaper, 'question_papers'),
+        uploadFile(gradingRubric, 'grading_rubrics'),
+        uploadFile(answerSheet, 'answer_sheets'),
+      ]);
+
+      // Create grading session
+      const { data: session, error: sessionError } = await supabase
+        .from('grading_sessions')
+        .insert({
+          question_paper_path: questionPaperPath,
+          grading_rubric_path: gradingRubricPath,
+          answer_sheet_path: answerSheetPath,
+        })
+        .select()
+        .single();
+
+      if (sessionError) throw sessionError;
+
+      // Start processing
+      const { data: processingResult, error: processingError } = await supabase.functions
+        .invoke('process-grading', {
+          body: { sessionId: session.id },
+        });
+
+      if (processingError) throw processingError;
+
+      toast({
+        title: "Grading completed",
+        description: "Your files have been processed successfully.",
+      });
+
+      // Reset form
+      setQuestionPaper(null);
+      setGradingRubric(null);
+      setAnswerSheet(null);
+      
+    } catch (error) {
+      console.error('Error processing files:', error);
+      toast({
+        title: "Error",
+        description: "An error occurred while processing the files. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   return (
@@ -63,9 +120,9 @@ const Index = () => {
           <Button
             type="submit"
             className="w-full"
-            disabled={!questionPaper || !gradingRubric || !answerSheet}
+            disabled={!questionPaper || !gradingRubric || !answerSheet || isProcessing}
           >
-            Process Files
+            {isProcessing ? "Processing..." : "Process Files"}
           </Button>
         </form>
       </div>

@@ -45,12 +45,11 @@ serve(async (req) => {
       throw new Error('Failed to download one or more required files')
     }
 
-    // Convert files to text using the Blob API
-    const [questionPaper, gradingRubric, answerSheet] = await Promise.all([
-      new Response(questionPaperRes.data).text(),
-      new Response(gradingRubricRes.data).text(),
-      new Response(answerSheetRes.data).text()
-    ]);
+    // Convert ArrayBuffer to text using TextDecoder
+    const decoder = new TextDecoder();
+    const questionPaper = decoder.decode(questionPaperRes.data);
+    const gradingRubric = decoder.decode(gradingRubricRes.data);
+    const answerSheet = decoder.decode(answerSheetRes.data);
 
     console.log('Files extracted successfully')
 
@@ -69,13 +68,13 @@ serve(async (req) => {
     const result = await model.generateContent(`You are an expert grading assistant. Your task is to evaluate a student's answer based on the provided question paper and grading rubric.
 
 Question Paper:
-${questionPaper.substring(0, 1000)}
+${questionPaper}
 
 Grading Rubric:
-${gradingRubric.substring(0, 1000)}
+${gradingRubric}
 
 Student's Answer:
-${answerSheet.substring(0, 1000)}
+${answerSheet}
 
 Please analyze the student's answer against the question paper and grading rubric. Provide:
 

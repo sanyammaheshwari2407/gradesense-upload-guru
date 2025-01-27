@@ -45,11 +45,12 @@ serve(async (req) => {
       throw new Error('Failed to download one or more required files')
     }
 
-    // Convert ArrayBuffer to text using TextDecoder
-    const decoder = new TextDecoder();
-    const questionPaper = decoder.decode(questionPaperRes.data);
-    const gradingRubric = decoder.decode(gradingRubricRes.data);
-    const answerSheet = decoder.decode(answerSheetRes.data);
+    // Convert Blob data to text using Response API
+    const [questionPaper, gradingRubric, answerSheet] = await Promise.all([
+      new Response(questionPaperRes.data).arrayBuffer().then(buffer => new TextDecoder().decode(buffer)),
+      new Response(gradingRubricRes.data).arrayBuffer().then(buffer => new TextDecoder().decode(buffer)),
+      new Response(answerSheetRes.data).arrayBuffer().then(buffer => new TextDecoder().decode(buffer))
+    ]);
 
     console.log('Files extracted successfully')
 

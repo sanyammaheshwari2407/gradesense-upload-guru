@@ -90,7 +90,8 @@ serve(async (req) => {
       { 
         headers: { 
           ...corsHeaders, 
-          'Content-Type': '
+          'Content-Type': 'application/json'
+        }
       }
     )
 

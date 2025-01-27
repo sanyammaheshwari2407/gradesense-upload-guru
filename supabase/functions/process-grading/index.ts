@@ -44,17 +44,23 @@ serve(async (req) => {
 
     // Convert to text
     const text = await answerSheetData.text()
-    console.log('Answer sheet text extracted')
+    console.log('Answer sheet text extracted:', text.substring(0, 100) + '...')
 
     // Process with Gemini API
     console.log('Processing with Gemini API...')
+    
+    const geminiApiKey = Deno.env.get('GEMINI_API_KEY')
+    if (!geminiApiKey) {
+      throw new Error('GEMINI_API_KEY is not configured')
+    }
+
     const geminiResponse = await fetch(
       'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
       {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${Deno.env.get('GEMINI_API_KEY')}`
+          'Authorization': `Bearer ${geminiApiKey}`
         },
         body: JSON.stringify({
           contents: [{
@@ -74,11 +80,18 @@ serve(async (req) => {
       }
     )
 
+    if (!geminiResponse.ok) {
+      const errorText = await geminiResponse.text()
+      console.error('Gemini API error:', errorText)
+      throw new Error(`Gemini API error: ${geminiResponse.status} ${errorText}`)
+    }
+
     const geminiData = await geminiResponse.json()
-    console.log('Gemini API response received')
+    console.log('Gemini API raw response:', geminiData)
 
     if (!geminiData.candidates?.[0]?.content?.parts?.[0]?.text) {
-      throw new Error('Failed to process grading with Gemini')
+      console.error('Invalid Gemini API response format:', geminiData)
+      throw new Error('Invalid response format from Gemini API')
     }
 
     const gradingResults = geminiData.candidates[0].content.parts[0].text
@@ -101,8 +114,14 @@ serve(async (req) => {
   } catch (error) {
     console.error('Error processing grading:', error)
     return new Response(
-      JSON.stringify({ error: error.message }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      JSON.stringify({ 
+        error: error.message,
+        details: error.stack
+      }),
+      { 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+        status: 500 
+      }
     )
   }
 })

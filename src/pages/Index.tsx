@@ -3,6 +3,7 @@ import { FileUpload } from "@/components/FileUpload";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 
 const Index = () => {
   const [questionPaper, setQuestionPaper] = useState<File | null>(null);
@@ -63,7 +64,7 @@ const Index = () => {
           grading_rubric_path: gradingRubricPath,
           answer_sheet_path: answerSheetPath,
           status: 'pending'
-        })
+        } satisfies Database['public']['Tables']['grading_sessions']['Insert'])
         .select()
         .single();
 

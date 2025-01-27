@@ -22,6 +22,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseKey)
 
+    // Fetch session details
     console.log('Fetching session details...')
     const { data: session, error: sessionError } = await supabase
       .from('grading_sessions')
@@ -36,7 +37,7 @@ serve(async (req) => {
 
     console.log('Session found:', session)
 
-    // Process answer sheet first
+    // Download files sequentially to prevent memory issues
     console.log('Downloading answer sheet...')
     const answerSheet = await supabase.storage
       .from('answer_sheets')
@@ -46,38 +47,100 @@ serve(async (req) => {
       throw new Error('Failed to download answer sheet')
     }
 
-    // Convert answer sheet to base64
+    // Convert answer sheet to base64 for Vision API
     const answerSheetBase64 = await answerSheet.data.arrayBuffer()
       .then(buffer => btoa(String.fromCharCode(...new Uint8Array(buffer))))
 
-    console.log('Answer sheet processed, calling Vision API...')
-    
-    // Mock Vision API call for now
-    console.log('Using mock Vision API response')
-    const extractedText = "Mock extracted text from answer sheet"
-
-    // Mock grading logic
-    const answers = [
-      {
-        questionNumber: 1,
-        text: extractedText.substring(0, 200),
-        score: 8,
-        maxScore: 10,
-        feedback: "Good attempt, but missing some key points"
+    // Call Vision API to extract text
+    console.log('Calling Vision API...')
+    const visionResponse = await fetch('https://vision.googleapis.com/v1/images:annotate?key=' + Deno.env.get('GOOGLE_VISION_API_KEY'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
       },
-      {
-        questionNumber: 2,
-        text: extractedText.substring(200, 400),
-        score: 7,
-        maxScore: 10,
-        feedback: "Partial understanding demonstrated"
-      }
-    ]
+      body: JSON.stringify({
+        requests: [{
+          image: {
+            content: answerSheetBase64
+          },
+          features: [{
+            type: 'DOCUMENT_TEXT_DETECTION'
+          }]
+        }]
+      })
+    })
+
+    const visionData = await visionResponse.json()
+    console.log('Vision API response received')
+
+    if (!visionData.responses?.[0]?.fullTextAnnotation?.text) {
+      throw new Error('Failed to extract text from answer sheet')
+    }
+
+    const extractedText = visionData.responses[0].fullTextAnnotation.text
+
+    // Download question paper and rubric
+    console.log('Downloading question paper and rubric...')
+    const [questionPaper, gradingRubric] = await Promise.all([
+      supabase.storage.from('question_papers').download(session.question_paper_path),
+      supabase.storage.from('grading_rubrics').download(session.grading_rubric_path)
+    ])
+
+    if (!questionPaper.data || !gradingRubric.data) {
+      throw new Error('Failed to download question paper or rubric')
+    }
+
+    // Convert files to text
+    const questionPaperText = await questionPaper.data.text()
+    const gradingRubricText = await gradingRubric.data.text()
+
+    // Call Gemini API for processing and grading
+    console.log('Calling Gemini API...')
+    const geminiResponse = await fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${Deno.env.get('GEMINI_API_KEY')}`
+      },
+      body: JSON.stringify({
+        contents: [{
+          parts: [{
+            text: `You are a grading assistant. Please grade the following student answer based on the question paper and grading rubric.
+            
+            Question Paper:
+            ${questionPaperText}
+            
+            Grading Rubric:
+            ${gradingRubricText}
+            
+            Student Answer (extracted from handwritten sheet):
+            ${extractedText}
+            
+            Please provide:
+            1. Score for each question
+            2. Detailed feedback for each answer
+            3. Explanation of any deductions
+            4. Overall score and comments`
+          }]
+        }]
+      })
+    })
+
+    const geminiData = await geminiResponse.json()
+    console.log('Gemini API response received')
+
+    if (!geminiData.candidates?.[0]?.content?.parts?.[0]?.text) {
+      throw new Error('Failed to process grading with Gemini')
+    }
+
+    const gradingResults = geminiData.candidates[0].content.parts[0].text
 
     // Update session status
     const { error: updateError } = await supabase
       .from('grading_sessions')
-      .update({ status: 'completed' })
+      .update({ 
+        status: 'completed',
+      })
       .eq('id', sessionId)
 
     if (updateError) {
@@ -89,9 +152,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({
         message: 'Grading completed successfully',
-        answers,
-        totalScore: answers.reduce((sum, ans) => sum + ans.score, 0),
-        maxPossibleScore: answers.reduce((sum, ans) => sum + ans.maxScore, 0)
+        results: gradingResults
       }),
       { 
         headers: { 

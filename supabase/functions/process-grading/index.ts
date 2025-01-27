@@ -14,7 +14,9 @@ serve(async (req) => {
   }
 
   try {
+    console.log('Processing grading request...');
     const { sessionId } = await req.json()
+    console.log('Session ID:', sessionId);
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!
@@ -28,77 +30,68 @@ serve(async (req) => {
       .eq('id', sessionId)
       .single()
 
-    if (sessionError || !session) {
+    if (sessionError) {
+      console.error('Session error:', sessionError);
       throw new Error('Session not found')
     }
 
+    if (!session) {
+      console.error('No session found');
+      throw new Error('Session not found')
+    }
+
+    console.log('Session found:', session);
+
     // Initialize Vision API client
+    const credentials = JSON.parse(Deno.env.get('GOOGLE_VISION_API_KEY') || '{}');
     const visionClient = new vision.ImageAnnotatorClient({
-      credentials: { private_key: Deno.env.get('GOOGLE_VISION_API_KEY') }
+      credentials
     })
 
     // Get answer sheet file
-    const { data: answerSheet } = await supabase.storage
+    const { data: answerSheet, error: downloadError } = await supabase.storage
       .from('answer_sheets')
       .download(session.answer_sheet_path)
 
-    if (!answerSheet) {
+    if (downloadError || !answerSheet) {
+      console.error('Download error:', downloadError);
       throw new Error('Answer sheet not found')
     }
+
+    console.log('Answer sheet downloaded successfully');
 
     // Process answer sheet with Vision API
     const [result] = await visionClient.documentTextDetection(answerSheet)
     const fullText = result.fullTextAnnotation?.text || ''
 
+    console.log('Text extracted successfully');
+
     // Extract questions and answers
     const answers = extractQuestionsAndAnswers(fullText)
 
-    // Store extracted answers
-    for (const answer of answers) {
-      await supabase.from('extracted_answers').insert({
-        grading_session_id: sessionId,
-        question_number: answer.questionNumber,
-        extracted_text: answer.text,
-        confidence_score: answer.confidence,
-        needs_review: answer.confidence < 0.8
-      })
-    }
-
-    // Get grading rubric
-    const { data: rubric } = await supabase.storage
-      .from('grading_rubrics')
-      .download(session.grading_rubric_path)
-
-    if (!rubric) {
-      throw new Error('Grading rubric not found')
-    }
-
-    // Grade answers and generate feedback
-    const gradingResults = await gradeAnswers(answers, rubric)
-
-    // Store grading results
-    for (const result of gradingResults) {
-      await supabase.from('grading_results').insert({
-        grading_session_id: sessionId,
-        question_number: result.questionNumber,
-        score: result.score,
-        max_score: result.maxScore,
-        feedback: result.feedback
-      })
-    }
-
     // Update session status
-    await supabase
+    const { error: updateError } = await supabase
       .from('grading_sessions')
       .update({ status: 'completed' })
       .eq('id', sessionId)
 
+    if (updateError) {
+      console.error('Update error:', updateError);
+      throw updateError;
+    }
+
+    console.log('Grading completed successfully');
+
     return new Response(
       JSON.stringify({ 
         message: 'Grading completed successfully',
-        results: gradingResults 
+        answers 
       }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      { 
+        headers: { 
+          ...corsHeaders, 
+          'Content-Type': '
+      }
     )
 
   } catch (error) {
@@ -151,14 +144,4 @@ function extractQuestionsAndAnswers(text: string) {
   }
 
   return answers
-}
-
-async function gradeAnswers(answers: any[], rubric: any) {
-  // Basic implementation - this should be enhanced based on your specific rubric format
-  return answers.map(answer => ({
-    questionNumber: answer.questionNumber,
-    score: 8, // This should be calculated based on rubric criteria
-    maxScore: 10,
-    feedback: "Your answer is mostly correct, but could use more detail."
-  }))
 }

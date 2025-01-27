@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { FileUpload } from "@/components/FileUpload";
 import { Button } from "@/components/ui/button";
-import { toast } from "@/components/ui/use-toast";
+import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import type { Database } from "@/integrations/supabase/types";
 
@@ -13,17 +13,22 @@ const Index = () => {
 
   const uploadFile = async (file: File, bucket: string) => {
     const fileExt = file.name.split('.').pop();
-    const filePath = `${crypto.randomUUID()}.${fileExt}`;
+    const fileName = `${crypto.randomUUID()}.${fileExt}`;
     
-    const { error: uploadError } = await supabase.storage
+    const { data, error: uploadError } = await supabase.storage
       .from(bucket)
-      .upload(filePath, file);
+      .upload(fileName, file);
 
     if (uploadError) {
+      console.error(`Error uploading to ${bucket}:`, uploadError);
       throw new Error(`Error uploading ${bucket}: ${uploadError.message}`);
     }
 
-    return filePath;
+    if (!data?.path) {
+      throw new Error(`No path returned from ${bucket} upload`);
+    }
+
+    return data.path;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -41,6 +46,20 @@ const Index = () => {
     setIsProcessing(true);
     
     try {
+      // Check if user is authenticated
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        toast({
+          title: "Authentication required",
+          description: "Please log in to process files.",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      console.log("Starting file uploads...");
+      
       // Upload files to respective buckets
       const [questionPaperPath, gradingRubricPath, answerSheetPath] = await Promise.all([
         uploadFile(questionPaper, 'question_papers'),
@@ -48,29 +67,31 @@ const Index = () => {
         uploadFile(answerSheet, 'answer_sheets'),
       ]);
 
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
+      console.log("Files uploaded successfully, creating grading session...");
       
-      if (!user) {
-        throw new Error('User not authenticated');
-      }
-
       // Create grading session
       const { data: session, error: sessionError } = await supabase
         .from('grading_sessions')
         .insert({
-          user_id: user.id,
           question_paper_path: questionPaperPath,
           grading_rubric_path: gradingRubricPath,
           answer_sheet_path: answerSheetPath,
-          status: 'pending'
+          status: 'pending',
+          user_id: user.id
         } satisfies Database['public']['Tables']['grading_sessions']['Insert'])
         .select()
         .single();
 
-      if (sessionError || !session) {
-        throw sessionError || new Error('Failed to create grading session');
+      if (sessionError) {
+        console.error("Error creating grading session:", sessionError);
+        throw sessionError;
       }
+
+      if (!session) {
+        throw new Error('Failed to create grading session');
+      }
+
+      console.log("Grading session created successfully:", session);
 
       // Start processing
       const { error: processingError } = await supabase.functions
@@ -78,7 +99,10 @@ const Index = () => {
           body: { sessionId: session.id },
         });
 
-      if (processingError) throw processingError;
+      if (processingError) {
+        console.error("Error invoking process-grading function:", processingError);
+        throw processingError;
+      }
 
       toast({
         title: "Grading started",

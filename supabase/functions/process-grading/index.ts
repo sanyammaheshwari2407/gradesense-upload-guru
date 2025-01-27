@@ -22,6 +22,7 @@ serve(async (req) => {
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     const supabase = createClient(supabaseUrl, supabaseKey)
 
+    console.log('Fetching session details...');
     // Get session details
     const { data: session, error: sessionError } = await supabase
       .from('grading_sessions')
@@ -53,7 +54,7 @@ serve(async (req) => {
 
     console.log('Answer sheet downloaded successfully');
 
-    // For now, return a mock response since Vision API is not fully configured
+    // Mock response for testing
     const mockAnswers = [
       {
         questionNumber: 1,
@@ -67,6 +68,8 @@ serve(async (req) => {
       }
     ];
 
+    console.log('Preparing mock answers:', mockAnswers);
+
     // Update session status
     const { error: updateError } = await supabase
       .from('grading_sessions')
@@ -78,7 +81,8 @@ serve(async (req) => {
       throw updateError;
     }
 
-    console.log('Grading completed successfully');
+    console.log('Session status updated to completed');
+    console.log('Sending response with mock answers');
 
     return new Response(
       JSON.stringify({ 

@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1'
+import { GoogleGenerativeAI } from 'npm:@google/generative-ai'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -54,47 +55,23 @@ serve(async (req) => {
       throw new Error('GEMINI_API_KEY is not configured')
     }
 
-    const geminiResponse = await fetch(
-      'https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent',
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${geminiApiKey}`
-        },
-        body: JSON.stringify({
-          contents: [{
-            parts: [{
-              text: `You are a grading assistant. Please analyze this student's answer and provide feedback:
+    const genAI = new GoogleGenerativeAI(geminiApiKey)
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
+
+    console.log('Sending request to Gemini API...')
+    const result = await model.generateContent(`You are a grading assistant. Please analyze this student's answer and provide feedback:
               
-              Student Answer:
-              ${text.substring(0, 1000)} // Limit text length for MVP
-              
-              Please provide:
-              1. Brief feedback (2-3 sentences)
-              2. Key areas for improvement
-              3. Overall score (out of 100)`
-            }]
-          }]
-        })
-      }
-    )
+    Student Answer:
+    ${text.substring(0, 1000)} // Limit text length for MVP
+    
+    Please provide:
+    1. Brief feedback (2-3 sentences)
+    2. Key areas for improvement
+    3. Overall score (out of 100)`)
 
-    if (!geminiResponse.ok) {
-      const errorText = await geminiResponse.text()
-      console.error('Gemini API error:', errorText)
-      throw new Error(`Gemini API error: ${geminiResponse.status} ${errorText}`)
-    }
-
-    const geminiData = await geminiResponse.json()
-    console.log('Gemini API raw response:', geminiData)
-
-    if (!geminiData.candidates?.[0]?.content?.parts?.[0]?.text) {
-      console.error('Invalid Gemini API response format:', geminiData)
-      throw new Error('Invalid response format from Gemini API')
-    }
-
-    const gradingResults = geminiData.candidates[0].content.parts[0].text
+    const response = await result.response
+    const gradingResults = response.text()
+    console.log('Gemini API response:', gradingResults)
 
     // Update session status
     await supabase

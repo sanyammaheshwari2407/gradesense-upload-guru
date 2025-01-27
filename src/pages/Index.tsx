@@ -1,17 +1,12 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileUpload } from "@/components/FileUpload";
-import { Button } from "@/components/ui/button";
 import { toast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
-import type { Database } from "@/integrations/supabase/types";
-import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
+import { GradingFeedback } from "@/components/GradingFeedback";
+import { GradingForm } from "@/components/GradingForm";
 
 const Index = () => {
   const navigate = useNavigate();
-  const [questionPaper, setQuestionPaper] = useState<File | null>(null);
-  const [gradingRubric, setGradingRubric] = useState<File | null>(null);
-  const [answerSheet, setAnswerSheet] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -55,18 +50,11 @@ const Index = () => {
     return data.path;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!questionPaper || !gradingRubric || !answerSheet) {
-      toast({
-        title: "Missing files",
-        description: "Please upload all required files before submitting.",
-        variant: "destructive",
-      });
-      return;
-    }
-
+  const handleSubmit = async (files: {
+    questionPaper: File;
+    gradingRubric: File;
+    answerSheet: File;
+  }) => {
     setIsProcessing(true);
     
     try {
@@ -80,9 +68,9 @@ const Index = () => {
       console.log("Starting file uploads...");
       
       const [questionPaperPath, gradingRubricPath, answerSheetPath] = await Promise.all([
-        uploadFile(questionPaper, 'question_papers'),
-        uploadFile(gradingRubric, 'grading_rubrics'),
-        uploadFile(answerSheet, 'answer_sheets'),
+        uploadFile(files.questionPaper, 'question_papers'),
+        uploadFile(files.gradingRubric, 'grading_rubrics'),
+        uploadFile(files.answerSheet, 'answer_sheets'),
       ]);
 
       console.log("Files uploaded successfully, creating grading session...");
@@ -95,7 +83,7 @@ const Index = () => {
           answer_sheet_path: answerSheetPath,
           status: 'pending',
           user_id: user.id
-        } satisfies Database['public']['Tables']['grading_sessions']['Insert'])
+        })
         .select()
         .single();
 
@@ -126,7 +114,6 @@ const Index = () => {
         setFeedback(gradingResponse.results);
         setShowFeedback(true);
 
-        // Update the session with the feedback
         await supabase
           .from('grading_sessions')
           .update({ 
@@ -140,11 +127,6 @@ const Index = () => {
         title: "Grading completed",
         description: "Your files have been processed successfully.",
       });
-
-      // Reset form
-      setQuestionPaper(null);
-      setGradingRubric(null);
-      setAnswerSheet(null);
       
     } catch (error) {
       console.error('Error processing files:', error);
@@ -176,56 +158,8 @@ const Index = () => {
           </p>
         </div>
 
-        {showFeedback && feedback && (
-          <Alert className="mb-8">
-            <AlertTitle>Grading Results</AlertTitle>
-            <AlertDescription>
-              <div className="mt-2 space-y-4">
-                {feedback.split('\n\n').map((section, index) => {
-                  if (!section.trim()) return null;
-                  return (
-                    <div key={index} className="space-y-2">
-                      {section.split('\n').map((line, lineIndex) => (
-                        line.trim() && (
-                          <div key={`${index}-${lineIndex}`} className="flex items-start">
-                            <span className="mr-2">•</span>
-                            <p className="flex-1">{line.trim().replace(/\*\*/g, '')}</p>
-                          </div>
-                        )
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            </AlertDescription>
-          </Alert>
-        )}
-
-        <form onSubmit={handleSubmit} className="space-y-6 bg-white p-8 rounded-xl shadow-sm">
-          <FileUpload
-            label="Question Paper"
-            accept=".pdf,.docx"
-            onChange={setQuestionPaper}
-          />
-          <FileUpload
-            label="Grading Rubric"
-            accept=".pdf,.docx"
-            onChange={setGradingRubric}
-          />
-          <FileUpload
-            label="Handwritten Answer Sheet"
-            accept=".pdf,.jpg,.jpeg,.png"
-            onChange={setAnswerSheet}
-          />
-          
-          <Button
-            type="submit"
-            className="w-full"
-            disabled={!questionPaper || !gradingRubric || !answerSheet || isProcessing}
-          >
-            {isProcessing ? "Processing..." : "Process Files"}
-          </Button>
-        </form>
+        <GradingFeedback feedback={feedback || ""} visible={showFeedback} />
+        <GradingForm onSubmit={handleSubmit} isProcessing={isProcessing} />
       </div>
     </div>
   );

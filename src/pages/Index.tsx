@@ -72,7 +72,7 @@ const Index = () => {
       }
 
       // Start processing
-      const { data: processingResult, error: processingError } = await supabase.functions
+      const { error: processingError } = await supabase.functions
         .invoke('process-grading', {
           body: { sessionId: session.id },
         });
@@ -80,8 +80,8 @@ const Index = () => {
       if (processingError) throw processingError;
 
       toast({
-        title: "Grading completed",
-        description: "Your files have been processed successfully.",
+        title: "Grading started",
+        description: "Your files are being processed. You'll be notified when the grading is complete.",
       });
 
       // Reset form

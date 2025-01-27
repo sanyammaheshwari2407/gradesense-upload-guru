@@ -34,14 +34,9 @@ serve(async (req) => {
       throw new Error('Session not found')
     }
 
-    if (!session) {
-      console.error('No session found')
-      throw new Error('Session not found')
-    }
-
     console.log('Session found:', session)
 
-    // Download files one at a time to prevent memory issues
+    // Process answer sheet first
     console.log('Downloading answer sheet...')
     const answerSheet = await supabase.storage
       .from('answer_sheets')
@@ -55,36 +50,13 @@ serve(async (req) => {
     const answerSheetBase64 = await answerSheet.data.arrayBuffer()
       .then(buffer => btoa(String.fromCharCode(...new Uint8Array(buffer))))
 
-    console.log('Calling Vision API...')
-    const visionApiKey = Deno.env.get('GOOGLE_VISION_API_KEY')!
-    const visionResponse = await fetch(
-      `https://vision.googleapis.com/v1/images:annotate?key=${visionApiKey}`,
-      {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          requests: [{
-            image: {
-              content: answerSheetBase64
-            },
-            features: [{
-              type: 'DOCUMENT_TEXT_DETECTION'
-            }]
-          }]
-        })
-      }
-    )
+    console.log('Answer sheet processed, calling Vision API...')
+    
+    // Mock Vision API call for now
+    console.log('Using mock Vision API response')
+    const extractedText = "Mock extracted text from answer sheet"
 
-    const visionData = await visionResponse.json()
-    console.log('Vision API response received')
-
-    // Extract text from Vision API response
-    const extractedText = visionData.responses?.[0]?.fullTextAnnotation?.text || ''
-    console.log('Extracted text length:', extractedText.length)
-
-    // Simple mock grading logic
+    // Mock grading logic
     const answers = [
       {
         questionNumber: 1,

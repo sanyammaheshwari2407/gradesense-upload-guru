@@ -122,20 +122,18 @@ const Index = () => {
 
       console.log("Grading response received:", gradingResponse);
 
-      // Fetch the updated session to get the feedback
-      const { data: updatedSession, error: fetchError } = await supabase
-        .from('grading_sessions')
-        .select('feedback')
-        .eq('id', session.id)
-        .single();
-
-      if (fetchError) {
-        throw fetchError;
-      }
-
-      if (updatedSession?.feedback) {
-        setFeedback(updatedSession.feedback);
+      if (gradingResponse?.results) {
+        setFeedback(gradingResponse.results);
         setShowFeedback(true);
+
+        // Update the session with the feedback
+        await supabase
+          .from('grading_sessions')
+          .update({ 
+            feedback: gradingResponse.results,
+            status: 'completed'
+          })
+          .eq('id', session.id);
       }
 
       toast({
@@ -180,17 +178,24 @@ const Index = () => {
 
         {showFeedback && feedback && (
           <Alert className="mb-8">
-            <AlertTitle>Grading Feedback</AlertTitle>
+            <AlertTitle>Grading Results</AlertTitle>
             <AlertDescription>
-              <div className="mt-2 space-y-2">
-                {feedback.split('\n').map((point, index) => (
-                  point.trim() && (
-                    <div key={index} className="flex items-start">
-                      <span className="mr-2">•</span>
-                      <p>{point.trim()}</p>
+              <div className="mt-2 space-y-4">
+                {feedback.split('\n\n').map((section, index) => {
+                  if (!section.trim()) return null;
+                  return (
+                    <div key={index} className="space-y-2">
+                      {section.split('\n').map((line, lineIndex) => (
+                        line.trim() && (
+                          <div key={`${index}-${lineIndex}`} className="flex items-start">
+                            <span className="mr-2">•</span>
+                            <p className="flex-1">{line.trim().replace(/\*\*/g, '')}</p>
+                          </div>
+                        )
+                      ))}
                     </div>
-                  )
-                ))}
+                  );
+                })}
               </div>
             </AlertDescription>
           </Alert>

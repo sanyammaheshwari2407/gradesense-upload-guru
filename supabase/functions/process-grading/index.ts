@@ -33,19 +33,26 @@ serve(async (req) => {
       throw new Error(`Session not found: ${sessionError.message}`)
     }
 
-    // Download answer sheet
-    console.log('Downloading answer sheet...')
-    const { data: answerSheetData, error: downloadError } = await supabase.storage
-      .from('answer_sheets')
-      .download(session.answer_sheet_path)
+    // Download all necessary files
+    console.log('Downloading files...')
+    const [questionPaperData, gradingRubricData, answerSheetData] = await Promise.all([
+      supabase.storage.from('question_papers').download(session.question_paper_path),
+      supabase.storage.from('grading_rubrics').download(session.grading_rubric_path),
+      supabase.storage.from('answer_sheets').download(session.answer_sheet_path)
+    ]);
 
-    if (downloadError || !answerSheetData) {
-      throw new Error('Failed to download answer sheet')
+    if (!questionPaperData || !gradingRubricData || !answerSheetData) {
+      throw new Error('Failed to download one or more required files')
     }
 
-    // Convert to text
-    const text = await answerSheetData.text()
-    console.log('Answer sheet text extracted:', text.substring(0, 100) + '...')
+    // Convert files to text
+    const [questionPaper, gradingRubric, answerSheet] = await Promise.all([
+      questionPaperData.text(),
+      gradingRubricData.text(),
+      answerSheetData.text()
+    ]);
+
+    console.log('Files extracted successfully')
 
     // Process with Gemini API
     console.log('Processing with Gemini API...')
@@ -59,15 +66,24 @@ serve(async (req) => {
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
 
     console.log('Sending request to Gemini API...')
-    const result = await model.generateContent(`You are a grading assistant. Please analyze this student's answer and provide feedback:
-              
-    Student Answer:
-    ${text.substring(0, 1000)} // Limit text length for MVP
-    
-    Please provide:
-    1. Brief feedback (2-3 sentences)
-    2. Key areas for improvement
-    3. Overall score (out of 100)`)
+    const result = await model.generateContent(`You are an expert grading assistant. Your task is to evaluate a student's answer based on the provided question paper and grading rubric.
+
+Question Paper:
+${questionPaper.substring(0, 1000)}
+
+Grading Rubric:
+${gradingRubric.substring(0, 1000)}
+
+Student's Answer:
+${answerSheet.substring(0, 1000)}
+
+Please analyze the student's answer against the question paper and grading rubric. Provide:
+
+1. Brief Feedback (2-3 sentences): Evaluate how well the answer addresses the question requirements.
+2. Key Areas for Improvement: List specific points where the answer could be enhanced based on the rubric criteria.
+3. Overall Score (out of 100): Grade according to the rubric's scoring guidelines.
+
+Format your response exactly as shown above with these three numbered sections.`)
 
     const response = await result.response
     const gradingResults = response.text()
@@ -76,7 +92,10 @@ serve(async (req) => {
     // Update session status
     await supabase
       .from('grading_sessions')
-      .update({ status: 'completed' })
+      .update({ 
+        status: 'completed',
+        feedback: gradingResults
+      })
       .eq('id', sessionId)
 
     console.log('Grading completed successfully')

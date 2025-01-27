@@ -35,21 +35,21 @@ serve(async (req) => {
 
     // Download all necessary files
     console.log('Downloading files...')
-    const [questionPaperData, gradingRubricData, answerSheetData] = await Promise.all([
+    const [questionPaperRes, gradingRubricRes, answerSheetRes] = await Promise.all([
       supabase.storage.from('question_papers').download(session.question_paper_path),
       supabase.storage.from('grading_rubrics').download(session.grading_rubric_path),
       supabase.storage.from('answer_sheets').download(session.answer_sheet_path)
     ]);
 
-    if (!questionPaperData || !gradingRubricData || !answerSheetData) {
+    if (!questionPaperRes.data || !gradingRubricRes.data || !answerSheetRes.data) {
       throw new Error('Failed to download one or more required files')
     }
 
-    // Convert files to text
+    // Convert files to text using the Blob API
     const [questionPaper, gradingRubric, answerSheet] = await Promise.all([
-      questionPaperData.text(),
-      gradingRubricData.text(),
-      answerSheetData.text()
+      new Response(questionPaperRes.data).text(),
+      new Response(gradingRubricRes.data).text(),
+      new Response(answerSheetRes.data).text()
     ]);
 
     console.log('Files extracted successfully')

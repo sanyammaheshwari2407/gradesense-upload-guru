@@ -65,17 +65,26 @@ serve(async (req) => {
     const genAI = new GoogleGenerativeAI(geminiApiKey)
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
 
+    // Truncate content to avoid token limit issues
+    const truncateText = (text: string, maxLength = 2000) => {
+      return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
+    };
+
+    const truncatedQuestionPaper = truncateText(questionPaper);
+    const truncatedGradingRubric = truncateText(gradingRubric);
+    const truncatedAnswerSheet = truncateText(answerSheet);
+
     console.log('Sending request to Gemini API...')
     const result = await model.generateContent(`You are an expert grading assistant. Your task is to evaluate a student's answer based on the provided question paper and grading rubric.
 
 Question Paper:
-${questionPaper}
+${truncatedQuestionPaper}
 
 Grading Rubric:
-${gradingRubric}
+${truncatedGradingRubric}
 
 Student's Answer:
-${answerSheet}
+${truncatedAnswerSheet}
 
 Please analyze the student's answer against the question paper and grading rubric. Provide:
 

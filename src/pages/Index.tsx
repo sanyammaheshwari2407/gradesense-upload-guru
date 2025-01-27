@@ -47,18 +47,29 @@ const Index = () => {
         uploadFile(answerSheet, 'answer_sheets'),
       ]);
 
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      if (!user) {
+        throw new Error('User not authenticated');
+      }
+
       // Create grading session
       const { data: session, error: sessionError } = await supabase
         .from('grading_sessions')
         .insert({
+          user_id: user.id,
           question_paper_path: questionPaperPath,
           grading_rubric_path: gradingRubricPath,
           answer_sheet_path: answerSheetPath,
+          status: 'pending'
         })
         .select()
         .single();
 
-      if (sessionError) throw sessionError;
+      if (sessionError || !session) {
+        throw sessionError || new Error('Failed to create grading session');
+      }
 
       // Start processing
       const { data: processingResult, error: processingError } = await supabase.functions

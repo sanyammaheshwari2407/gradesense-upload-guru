@@ -13,8 +13,11 @@ const truncateText = (text: string, maxLength = 2000) => {
 };
 
 async function extractTextFromPDF(client: vision.ImageAnnotatorClient, pdfBytes: Uint8Array): Promise<string> {
+  // Convert Uint8Array to base64 using Deno's built-in encoder
+  const base64Content = btoa(String.fromCharCode(...pdfBytes));
+  
   const [result] = await client.documentTextDetection({
-    image: { content: Buffer.from(pdfBytes).toString('base64') }
+    image: { content: base64Content }
   });
   
   return result.fullTextAnnotation?.text || '';

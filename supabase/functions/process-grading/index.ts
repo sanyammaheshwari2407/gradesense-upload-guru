@@ -12,18 +12,34 @@ const truncateText = (text: string, maxLength = 2000) => {
   return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
 };
 
-async function extractTextFromPDF(client: vision.ImageAnnotatorClient, pdfBytes: Uint8Array): Promise<string> {
-  // Convert Uint8Array to base64 using Deno's built-in encoder
-  const base64Content = btoa(String.fromCharCode(...pdfBytes));
-  
-  const [result] = await client.documentTextDetection({
-    image: { content: base64Content }
-  });
-  
-  return result.fullTextAnnotation?.text || '';
+async function extractTextFromPDF(client: vision.ImageAnnotatorClient, fileBytes: Uint8Array): Promise<string> {
+  try {
+    console.log('Starting text extraction from file...');
+    
+    // Convert Uint8Array to base64
+    const base64Content = btoa(String.fromCharCode(...fileBytes));
+    
+    console.log('File converted to base64, sending to Vision API...');
+    
+    const [result] = await client.documentTextDetection({
+      image: { content: base64Content }
+    });
+    
+    if (!result.fullTextAnnotation?.text) {
+      console.warn('No text extracted from document');
+      return '';
+    }
+    
+    console.log('Text successfully extracted from document');
+    return result.fullTextAnnotation.text;
+  } catch (error) {
+    console.error('Error extracting text:', error);
+    throw new Error(`Failed to extract text: ${error.message}`);
+  }
 }
 
 serve(async (req) => {
+  // Handle CORS
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
   }
@@ -33,12 +49,16 @@ serve(async (req) => {
     const { sessionId } = await req.json()
     console.log('Session ID:', sessionId)
 
+    if (!sessionId) {
+      throw new Error('No session ID provided');
+    }
+
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    // Initialize Vision API client with proper credentials
+    // Initialize Vision API client
     const visionClient = new vision.ImageAnnotatorClient({
       credentials: {
         client_email: "gradesense@gen-lang-client-0103426051.iam.gserviceaccount.com",
@@ -54,11 +74,11 @@ serve(async (req) => {
       .eq('id', sessionId)
       .single()
 
-    if (sessionError) {
-      throw new Error(`Session not found: ${sessionError.message}`)
+    if (sessionError || !session) {
+      throw new Error(`Session not found: ${sessionError?.message || 'No session data'}`)
     }
 
-    // Download all necessary files
+    // Download files
     console.log('Downloading files...')
     const [questionPaperRes, gradingRubricRes, answerSheetRes] = await Promise.all([
       supabase.storage.from('question_papers').download(session.question_paper_path),
@@ -70,7 +90,7 @@ serve(async (req) => {
       throw new Error('Failed to download one or more required files')
     }
 
-    // Extract text from all documents using Vision API
+    // Extract text from documents
     console.log('Extracting text from documents...')
     const [questionPaperText, gradingRubricText, answerSheetText] = await Promise.all([
       extractTextFromPDF(visionClient, questionPaperRes.data),
@@ -78,7 +98,7 @@ serve(async (req) => {
       extractTextFromPDF(visionClient, answerSheetRes.data)
     ]);
 
-    // Store extracted text in database
+    // Store extracted text
     console.log('Storing extracted text...')
     const { error: extractedTextError } = await supabase
       .from('extracted_texts')
@@ -95,7 +115,6 @@ serve(async (req) => {
 
     // Process with Gemini API
     console.log('Processing with Gemini API...')
-    
     const geminiApiKey = Deno.env.get('GEMINI_API_KEY')
     if (!geminiApiKey) {
       throw new Error('GEMINI_API_KEY is not configured')
@@ -104,7 +123,7 @@ serve(async (req) => {
     const genAI = new GoogleGenerativeAI(geminiApiKey)
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
 
-    // Truncate texts to avoid token limit issues
+    // Truncate texts
     const truncatedQuestionPaper = truncateText(questionPaperText);
     const truncatedGradingRubric = truncateText(gradingRubricText);
     const truncatedAnswerSheet = truncateText(answerSheetText);
@@ -131,16 +150,20 @@ Format your response exactly as shown above with these three numbered sections.`
 
     const response = await result.response
     const gradingResults = response.text()
-    console.log('Gemini API response:', gradingResults)
+    console.log('Gemini API response received:', gradingResults)
 
-    // Update session status and feedback
-    await supabase
+    // Update session
+    const { error: updateError } = await supabase
       .from('grading_sessions')
       .update({ 
         status: 'completed',
         feedback: gradingResults
       })
       .eq('id', sessionId)
+
+    if (updateError) {
+      throw new Error(`Failed to update session: ${updateError.message}`);
+    }
 
     console.log('Grading completed successfully')
     return new Response(

@@ -38,11 +38,12 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
 
-    // Initialize Vision API client
+    // Initialize Vision API client with proper credentials
     const visionClient = new vision.ImageAnnotatorClient({
       credentials: {
-        client_email: 'your-service-account@your-project.iam.gserviceaccount.com',
+        client_email: "gradesense@gen-lang-client-0103426051.iam.gserviceaccount.com",
         private_key: Deno.env.get('GOOGLE_VISION_API_KEY')!,
+        project_id: "gen-lang-client-0103426051"
       },
     });
 

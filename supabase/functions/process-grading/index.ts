@@ -1,10 +1,23 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1'
 import { GoogleGenerativeAI } from 'npm:@google/generative-ai'
+import vision from 'npm:@google-cloud/vision'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+}
+
+const truncateText = (text: string, maxLength = 2000) => {
+  return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
+};
+
+async function extractTextFromPDF(client: vision.ImageAnnotatorClient, pdfBytes: Uint8Array): Promise<string> {
+  const [result] = await client.documentTextDetection({
+    image: { content: Buffer.from(pdfBytes).toString('base64') }
+  });
+  
+  return result.fullTextAnnotation?.text || '';
 }
 
 serve(async (req) => {
@@ -21,6 +34,14 @@ serve(async (req) => {
       Deno.env.get('SUPABASE_URL')!,
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
     )
+
+    // Initialize Vision API client
+    const visionClient = new vision.ImageAnnotatorClient({
+      credentials: {
+        client_email: 'your-service-account@your-project.iam.gserviceaccount.com',
+        private_key: Deno.env.get('GOOGLE_VISION_API_KEY')!,
+      },
+    });
 
     // Fetch session details
     const { data: session, error: sessionError } = await supabase
@@ -45,14 +66,28 @@ serve(async (req) => {
       throw new Error('Failed to download one or more required files')
     }
 
-    // Convert Blob data to text using Response API
-    const [questionPaper, gradingRubric, answerSheet] = await Promise.all([
-      new Response(questionPaperRes.data).arrayBuffer().then(buffer => new TextDecoder().decode(buffer)),
-      new Response(gradingRubricRes.data).arrayBuffer().then(buffer => new TextDecoder().decode(buffer)),
-      new Response(answerSheetRes.data).arrayBuffer().then(buffer => new TextDecoder().decode(buffer))
+    // Extract text from all documents using Vision API
+    console.log('Extracting text from documents...')
+    const [questionPaperText, gradingRubricText, answerSheetText] = await Promise.all([
+      extractTextFromPDF(visionClient, questionPaperRes.data),
+      extractTextFromPDF(visionClient, gradingRubricRes.data),
+      extractTextFromPDF(visionClient, answerSheetRes.data)
     ]);
 
-    console.log('Files extracted successfully')
+    // Store extracted text in database
+    console.log('Storing extracted text...')
+    const { error: extractedTextError } = await supabase
+      .from('extracted_texts')
+      .insert({
+        grading_session_id: sessionId,
+        question_paper_text: questionPaperText,
+        grading_rubric_text: gradingRubricText,
+        answer_sheet_text: answerSheetText
+      });
+
+    if (extractedTextError) {
+      throw new Error(`Failed to store extracted text: ${extractedTextError.message}`);
+    }
 
     // Process with Gemini API
     console.log('Processing with Gemini API...')
@@ -65,14 +100,10 @@ serve(async (req) => {
     const genAI = new GoogleGenerativeAI(geminiApiKey)
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
 
-    // Truncate content to avoid token limit issues
-    const truncateText = (text: string, maxLength = 2000) => {
-      return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
-    };
-
-    const truncatedQuestionPaper = truncateText(questionPaper);
-    const truncatedGradingRubric = truncateText(gradingRubric);
-    const truncatedAnswerSheet = truncateText(answerSheet);
+    // Truncate texts to avoid token limit issues
+    const truncatedQuestionPaper = truncateText(questionPaperText);
+    const truncatedGradingRubric = truncateText(gradingRubricText);
+    const truncatedAnswerSheet = truncateText(answerSheetText);
 
     console.log('Sending request to Gemini API...')
     const result = await model.generateContent(`You are an expert grading assistant. Your task is to evaluate a student's answer based on the provided question paper and grading rubric.
@@ -98,7 +129,7 @@ Format your response exactly as shown above with these three numbered sections.`
     const gradingResults = response.text()
     console.log('Gemini API response:', gradingResults)
 
-    // Update session status
+    // Update session status and feedback
     await supabase
       .from('grading_sessions')
       .update({ 

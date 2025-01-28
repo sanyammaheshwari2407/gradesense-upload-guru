@@ -9,6 +9,44 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
+      extracted_texts: {
+        Row: {
+          answer_sheet_text: string | null
+          created_at: string
+          grading_rubric_text: string | null
+          grading_session_id: string
+          id: string
+          question_paper_text: string | null
+          updated_at: string
+        }
+        Insert: {
+          answer_sheet_text?: string | null
+          created_at?: string
+          grading_rubric_text?: string | null
+          grading_session_id: string
+          id?: string
+          question_paper_text?: string | null
+          updated_at?: string
+        }
+        Update: {
+          answer_sheet_text?: string | null
+          created_at?: string
+          grading_rubric_text?: string | null
+          grading_session_id?: string
+          id?: string
+          question_paper_text?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "extracted_texts_grading_session_id_fkey"
+            columns: ["grading_session_id"]
+            isOneToOne: false
+            referencedRelation: "grading_sessions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       grading_sessions: {
         Row: {
           answer_sheet_path: string

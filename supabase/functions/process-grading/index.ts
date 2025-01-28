@@ -16,8 +16,11 @@ async function extractTextFromPDF(client: vision.ImageAnnotatorClient, fileBytes
   try {
     console.log('Starting text extraction from file...');
     
-    // Convert Uint8Array to base64
-    const base64Content = btoa(String.fromCharCode(...fileBytes));
+    // Convert Uint8Array to base64 using a more reliable method
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder();
+    const uint8Array = new Uint8Array(fileBytes);
+    const base64Content = btoa(decoder.decode(uint8Array));
     
     console.log('File converted to base64, sending to Vision API...');
     

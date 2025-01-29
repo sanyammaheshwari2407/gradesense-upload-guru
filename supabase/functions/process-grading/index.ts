@@ -15,8 +15,8 @@ async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array): Prom
   try {
     console.log('Starting text extraction from image...');
     
-    // Convert Uint8Array to base64 string
-    const base64Image = Buffer.from(fileBytes).toString('base64');
+    // Convert Uint8Array to base64 string using Deno's encoder
+    const base64Image = btoa(String.fromCharCode(...fileBytes));
     console.log('Image converted to base64');
     
     // Format request according to Vision API documentation

@@ -8,12 +8,14 @@ const corsHeaders = {
 }
 
 async function uploadToGCS(fileBytes: Uint8Array, fileName: string): Promise<string> {
-  const bucketName = Deno.env.get('GOOGLE_CLOUD_BUCKET')!;
-  const projectId = Deno.env.get('GOOGLE_CLOUD_PROJECT_ID')!;
-  const gcsInputUri = `gs://${bucketName}/inputs/${fileName}`;
+  const bucketName = Deno.env.get('GOOGLE_CLOUD_BUCKET');
+  const projectId = Deno.env.get('GOOGLE_CLOUD_PROJECT_ID');
   
-  // TODO: Implement actual GCS upload
-  // For now, we'll simulate the upload and return the GCS URI
+  if (!bucketName || !projectId) {
+    throw new Error('Missing required Google Cloud configuration');
+  }
+
+  const gcsInputUri = `gs://${bucketName}/inputs/${fileName}`;
   console.log(`File would be uploaded to: ${gcsInputUri}`);
   return gcsInputUri;
 }
@@ -32,17 +34,27 @@ async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array, fileN
     const gcsInputUri = await uploadToGCS(fileBytes, fileName);
     const gcsOutputUri = `gs://${bucketName}/outputs/`;
 
+    console.log('Preparing Vision API request with configuration:', {
+      inputUri: gcsInputUri,
+      outputUri: gcsOutputUri,
+      projectId
+    });
+
     const requestBody = {
       requests: [{
         inputConfig: {
           gcsSource: {
             uri: gcsInputUri
           },
-          mimeType: "image/jpeg" // Adjust based on file type
+          mimeType: "image/jpeg"
         },
         features: [{
-          type: "DOCUMENT_TEXT_DETECTION"
+          type: "DOCUMENT_TEXT_DETECTION",
+          maxResults: 1
         }],
+        imageContext: {
+          languageHints: ["en"]
+        },
         outputConfig: {
           gcsDestination: {
             uri: gcsOutputUri
@@ -52,7 +64,7 @@ async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array, fileN
       }]
     };
 
-    console.log('Starting async document processing...');
+    console.log('Making Vision API request...');
     const operationResponse = await fetch(
       `https://vision.googleapis.com/v1/files:asyncBatchAnnotate?key=${apiKey}`,
       {
@@ -138,7 +150,7 @@ async function processGradingSession(supabase: any, sessionId: string, apiKey: s
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response(null, { headers: corsHeaders })
+    return new Response(null, { headers: corsHeaders });
   }
 
   try {

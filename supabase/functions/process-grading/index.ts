@@ -30,7 +30,6 @@ async function extractTextFromImage(client: vision.ImageAnnotatorClient, fileByt
     }
     
     console.log('Text successfully extracted from image');
-    // The first annotation contains the entire text
     return detections[0].description || '';
   } catch (error) {
     console.error('Error extracting text:', error);
@@ -53,16 +52,26 @@ serve(async (req) => {
       throw new Error('No session ID provided');
     }
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
-    )
+    // Initialize Supabase client
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('Missing Supabase credentials');
+    }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Initialize Vision API client
+    const visionApiKey = Deno.env.get('GOOGLE_VISION_API_KEY');
+    if (!visionApiKey) {
+      throw new Error('Missing Google Vision API key');
+    }
+
     const visionClient = new vision.ImageAnnotatorClient({
       credentials: {
         client_email: "gradesense@gen-lang-client-0103426051.iam.gserviceaccount.com",
-        private_key: Deno.env.get('GOOGLE_VISION_API_KEY')!,
+        private_key: visionApiKey,
         project_id: "gen-lang-client-0103426051"
       },
     });
@@ -72,14 +81,14 @@ serve(async (req) => {
       .from('grading_sessions')
       .select('*')
       .eq('id', sessionId)
-      .single()
+      .single();
 
     if (sessionError || !session) {
-      throw new Error(`Session not found: ${sessionError?.message || 'No session data'}`)
+      throw new Error(`Session not found: ${sessionError?.message || 'No session data'}`);
     }
 
     // Download files
-    console.log('Downloading files...')
+    console.log('Downloading files...');
     const [questionPaperRes, gradingRubricRes, answerSheetRes] = await Promise.all([
       supabase.storage.from('question_papers').download(session.question_paper_path),
       supabase.storage.from('grading_rubrics').download(session.grading_rubric_path),
@@ -87,11 +96,11 @@ serve(async (req) => {
     ]);
 
     if (!questionPaperRes.data || !gradingRubricRes.data || !answerSheetRes.data) {
-      throw new Error('Failed to download one or more required files')
+      throw new Error('Failed to download one or more required files');
     }
 
     // Extract text from images
-    console.log('Extracting text from images...')
+    console.log('Extracting text from images...');
     const [questionPaperText, gradingRubricText, answerSheetText] = await Promise.all([
       extractTextFromImage(visionClient, questionPaperRes.data),
       extractTextFromImage(visionClient, gradingRubricRes.data),
@@ -99,7 +108,7 @@ serve(async (req) => {
     ]);
 
     // Store extracted text
-    console.log('Storing extracted text...')
+    console.log('Storing extracted text...');
     const { error: extractedTextError } = await supabase
       .from('extracted_texts')
       .insert({
@@ -114,21 +123,21 @@ serve(async (req) => {
     }
 
     // Process with Gemini API
-    console.log('Processing with Gemini API...')
-    const geminiApiKey = Deno.env.get('GEMINI_API_KEY')
+    console.log('Processing with Gemini API...');
+    const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
     if (!geminiApiKey) {
-      throw new Error('GEMINI_API_KEY is not configured')
+      throw new Error('GEMINI_API_KEY is not configured');
     }
 
-    const genAI = new GoogleGenerativeAI(geminiApiKey)
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
+    const genAI = new GoogleGenerativeAI(geminiApiKey);
+    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     // Truncate texts
     const truncatedQuestionPaper = truncateText(questionPaperText);
     const truncatedGradingRubric = truncateText(gradingRubricText);
     const truncatedAnswerSheet = truncateText(answerSheetText);
 
-    console.log('Sending request to Gemini API...')
+    console.log('Sending request to Gemini API...');
     const result = await model.generateContent(`You are an expert grading assistant. Your task is to evaluate a student's answer based on the provided question paper and grading rubric.
 
 Question Paper:
@@ -146,11 +155,11 @@ Please analyze the student's answer against the question paper and grading rubri
 2. Key Areas for Improvement: List specific points where the answer could be enhanced based on the rubric criteria.
 3. Overall Score (out of 100): Grade according to the rubric's scoring guidelines.
 
-Format your response exactly as shown above with these three numbered sections.`)
+Format your response exactly as shown above with these three numbered sections.`);
 
-    const response = await result.response
-    const gradingResults = response.text()
-    console.log('Gemini API response received:', gradingResults)
+    const response = await result.response;
+    const gradingResults = response.text();
+    console.log('Gemini API response received:', gradingResults);
 
     // Update session
     const { error: updateError } = await supabase
@@ -159,23 +168,23 @@ Format your response exactly as shown above with these three numbered sections.`
         status: 'completed',
         feedback: gradingResults
       })
-      .eq('id', sessionId)
+      .eq('id', sessionId);
 
     if (updateError) {
       throw new Error(`Failed to update session: ${updateError.message}`);
     }
 
-    console.log('Grading completed successfully')
+    console.log('Grading completed successfully');
     return new Response(
       JSON.stringify({
         message: 'Grading completed successfully',
         results: gradingResults
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    )
+    );
 
   } catch (error) {
-    console.error('Error processing grading:', error)
+    console.error('Error processing grading:', error);
     return new Response(
       JSON.stringify({ 
         error: error.message,
@@ -185,6 +194,6 @@ Format your response exactly as shown above with these three numbered sections.`
         headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
         status: 500 
       }
-    )
+    );
   }
-})
+});

@@ -52,7 +52,7 @@ serve(async (req) => {
       throw new Error('No session ID provided');
     }
 
-    // Initialize Supabase client
+    // Initialize clients and check environment variables
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     const googleApiKey = Deno.env.get('GOOGLE_API_KEY');
@@ -63,16 +63,14 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Initialize Vision API client with the new API key
+    // Initialize Vision API client
+    console.log('Initializing Vision API client...');
     const visionClient = new vision.ImageAnnotatorClient({
-      credentials: {
-        client_email: "gradesense@gen-lang-client-0103426051.iam.gserviceaccount.com",
-        private_key: googleApiKey,
-        project_id: "gen-lang-client-0103426051"
-      },
+      credentials: JSON.parse(googleApiKey)
     });
 
     // Fetch session details
+    console.log('Fetching session details...');
     const { data: session, error: sessionError } = await supabase
       .from('grading_sessions')
       .select('*')
@@ -118,7 +116,7 @@ serve(async (req) => {
       throw new Error(`Failed to store extracted text: ${extractedTextError.message}`);
     }
 
-    // Process with Gemini API using the same API key
+    // Process with Gemini API
     console.log('Processing with Gemini API...');
     const genAI = new GoogleGenerativeAI(googleApiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });

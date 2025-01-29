@@ -34,10 +34,30 @@ async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array, fileN
     const gcsInputUri = await uploadToGCS(fileBytes, fileName);
     const gcsOutputUri = `gs://${bucketName}/outputs/`;
 
+    // Determine MIME type based on file extension
+    const fileExt = fileName.split('.').pop()?.toLowerCase();
+    let mimeType: string;
+    
+    switch (fileExt) {
+      case 'pdf':
+        mimeType = 'application/pdf';
+        break;
+      case 'gif':
+        mimeType = 'image/gif';
+        break;
+      case 'tiff':
+      case 'tif':
+        mimeType = 'image/tiff';
+        break;
+      default:
+        throw new Error(`Unsupported file type: ${fileExt}. Only PDF, GIF, and TIFF files are supported.`);
+    }
+
     console.log('Preparing Vision API request with configuration:', {
       inputUri: gcsInputUri,
       outputUri: gcsOutputUri,
-      projectId
+      projectId,
+      mimeType
     });
 
     const requestBody = {
@@ -46,7 +66,7 @@ async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array, fileN
           gcsSource: {
             uri: gcsInputUri
           },
-          mimeType: "image/jpeg"
+          mimeType: mimeType
         },
         features: [{
           type: "DOCUMENT_TEXT_DETECTION",

@@ -55,23 +55,19 @@ serve(async (req) => {
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    const googleApiKey = Deno.env.get('GOOGLE_API_KEY');
 
-    if (!supabaseUrl || !supabaseKey) {
-      throw new Error('Missing Supabase credentials');
+    if (!supabaseUrl || !supabaseKey || !googleApiKey) {
+      throw new Error('Missing required environment variables');
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Initialize Vision API client
-    const visionApiKey = Deno.env.get('GOOGLE_VISION_API_KEY');
-    if (!visionApiKey) {
-      throw new Error('Missing Google Vision API key');
-    }
-
+    // Initialize Vision API client with the new API key
     const visionClient = new vision.ImageAnnotatorClient({
       credentials: {
         client_email: "gradesense@gen-lang-client-0103426051.iam.gserviceaccount.com",
-        private_key: visionApiKey,
+        private_key: googleApiKey,
         project_id: "gen-lang-client-0103426051"
       },
     });
@@ -122,14 +118,9 @@ serve(async (req) => {
       throw new Error(`Failed to store extracted text: ${extractedTextError.message}`);
     }
 
-    // Process with Gemini API
+    // Process with Gemini API using the same API key
     console.log('Processing with Gemini API...');
-    const geminiApiKey = Deno.env.get('GEMINI_API_KEY');
-    if (!geminiApiKey) {
-      throw new Error('GEMINI_API_KEY is not configured');
-    }
-
-    const genAI = new GoogleGenerativeAI(geminiApiKey);
+    const genAI = new GoogleGenerativeAI(googleApiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
     // Truncate texts

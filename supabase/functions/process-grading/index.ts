@@ -16,7 +16,7 @@ async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array): Prom
     console.log('Starting text extraction from image...');
     
     // Convert Uint8Array to base64 string using Deno's encoder
-    const base64Image = btoa(String.fromCharCode(...fileBytes));
+    const base64Image = btoa(String.fromCharCode(...new Uint8Array(fileBytes)));
     console.log('Image converted to base64');
     
     // Format request according to Vision API documentation
@@ -41,7 +41,7 @@ async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array): Prom
     });
 
     const result = await response.json();
-    console.log('Vision API response received:', JSON.stringify(result));
+    console.log('Vision API response received');
 
     if (!response.ok) {
       throw new Error(`Vision API error: ${response.status} ${JSON.stringify(result, null, 2)}`);

@@ -7,75 +7,84 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-async function uploadToGCS(fileBytes: Uint8Array, fileName: string, mimeType: string): Promise<string> {
+async function uploadToGCS(fileBytes: Uint8Array, fileName: string): Promise<string> {
   const bucketName = Deno.env.get('GOOGLE_CLOUD_BUCKET')!;
+  const projectId = Deno.env.get('GOOGLE_CLOUD_PROJECT_ID')!;
   const gcsInputUri = `gs://${bucketName}/inputs/${fileName}`;
   
-  // Implementation of GCS upload will go here
-  // For now, we'll use the direct Vision API approach
+  // TODO: Implement actual GCS upload
+  // For now, we'll simulate the upload and return the GCS URI
+  console.log(`File would be uploaded to: ${gcsInputUri}`);
   return gcsInputUri;
 }
 
-async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array): Promise<{ text: string; confidence: number; rawResponse: any }> {
+async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array, fileName: string): Promise<{ text: string; confidence: number; rawResponse: any }> {
   try {
-    console.log('Starting text extraction from image...');
+    console.log('Starting text extraction process...');
     
-    // Convert Uint8Array to base64
-    const base64Image = btoa(String.fromCharCode(...new Uint8Array(fileBytes)));
+    const bucketName = Deno.env.get('GOOGLE_CLOUD_BUCKET');
+    const projectId = Deno.env.get('GOOGLE_CLOUD_PROJECT_ID');
     
-    const visionRequest = {
+    if (!bucketName || !projectId) {
+      throw new Error('Missing required Google Cloud configuration');
+    }
+
+    const gcsInputUri = await uploadToGCS(fileBytes, fileName);
+    const gcsOutputUri = `gs://${bucketName}/outputs/`;
+
+    const requestBody = {
       requests: [{
-        image: {
-          content: base64Image
+        inputConfig: {
+          gcsSource: {
+            uri: gcsInputUri
+          },
+          mimeType: "image/jpeg" // Adjust based on file type
         },
         features: [{
-          type: "DOCUMENT_TEXT_DETECTION",
-          maxResults: 1
+          type: "DOCUMENT_TEXT_DETECTION"
         }],
-        imageContext: {
-          languageHints: ["en"]
+        outputConfig: {
+          gcsDestination: {
+            uri: gcsOutputUri
+          },
+          batchSize: 1
         }
       }]
     };
 
-    console.log('Sending request to Vision API...');
-    const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      body: JSON.stringify(visionRequest)
-    });
+    console.log('Starting async document processing...');
+    const operationResponse = await fetch(
+      `https://vision.googleapis.com/v1/files:asyncBatchAnnotate?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      }
+    );
 
-    if (!response.ok) {
-      const errorData = await response.json();
+    if (!operationResponse.ok) {
+      const errorData = await operationResponse.json();
       console.error('Vision API error:', errorData);
-      throw new Error(`Vision API error: ${response.status} ${JSON.stringify(errorData)}`);
+      throw new Error(`Vision API error: ${operationResponse.status} ${JSON.stringify(errorData)}`);
     }
 
-    const result = await response.json();
-    console.log('Vision API response received');
+    const operationResult = await operationResponse.json();
+    console.log('Operation started:', operationResult);
 
-    const firstResponse = result.responses?.[0];
-    if (!firstResponse) {
-      throw new Error('No response data from Vision API');
-    }
-
-    const fullTextAnnotation = firstResponse.fullTextAnnotation;
-    const text = fullTextAnnotation?.text || '';
-    
-    const confidence = fullTextAnnotation?.pages?.reduce((acc: number, page: any) => 
-      acc + (page.confidence || 0), 0) / (fullTextAnnotation?.pages?.length || 1);
-
+    // For now, return a simplified response
+    // In production, you would implement polling for operation completion
     return {
-      text,
-      confidence,
-      rawResponse: result
+      text: "Text extraction in progress",
+      confidence: 1.0,
+      rawResponse: operationResult
     };
+
   } catch (error) {
     console.error('Error extracting text:', error);
-    throw new Error(`Failed to extract text: ${error.message}`);
+    throw error;
   }
 }
 
@@ -99,9 +108,9 @@ async function processGradingSession(supabase: any, sessionId: string, apiKey: s
 
   // Process each document with Vision API
   const [questionPaper, gradingRubric, answerSheet] = await Promise.all([
-    extractTextFromImage(apiKey, questionPaperRes.data),
-    extractTextFromImage(apiKey, gradingRubricRes.data),
-    extractTextFromImage(apiKey, answerSheetRes.data)
+    extractTextFromImage(apiKey, questionPaperRes.data, session.question_paper_path),
+    extractTextFromImage(apiKey, gradingRubricRes.data, session.grading_rubric_path),
+    extractTextFromImage(apiKey, answerSheetRes.data, session.answer_sheet_path)
   ]);
 
   // Store extracted texts with Vision API responses

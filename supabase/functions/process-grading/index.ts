@@ -26,12 +26,8 @@ async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array): Prom
           content: base64Image
         },
         features: [{
-          type: "DOCUMENT_TEXT_DETECTION",
-          maxResults: 1
-        }],
-        imageContext: {
-          languageHints: ["en"]
-        }
+          type: "TEXT_DETECTION"
+        }]
       }]
     };
 

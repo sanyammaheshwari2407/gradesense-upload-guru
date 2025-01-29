@@ -15,7 +15,14 @@ async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array): Prom
   try {
     console.log('Starting text extraction from image...');
     
-    const base64Image = btoa(String.fromCharCode(...fileBytes));
+    // Convert Uint8Array to base64 string properly
+    const base64Image = btoa(
+      Array.from(fileBytes)
+        .map(byte => String.fromCharCode(byte))
+        .join('')
+    );
+    
+    console.log('Image converted to base64');
     
     const visionRequest = {
       requests: [{
@@ -29,11 +36,11 @@ async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array): Prom
       }]
     };
 
-    const response = await fetch('https://vision.googleapis.com/v1/images:annotate', {
+    console.log('Sending request to Vision API...');
+    const response = await fetch('https://vision.googleapis.com/v1/images:annotate?key=' + apiKey, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`
+        'Content-Type': 'application/json'
       },
       body: JSON.stringify(visionRequest)
     });

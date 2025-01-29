@@ -35,18 +35,18 @@ export const GradingForm = ({ onSubmit, isProcessing }: GradingFormProps) => {
   return (
     <form onSubmit={handleSubmit} className="space-y-6 bg-white p-8 rounded-xl shadow-sm">
       <FileUpload
-        label="Question Paper"
-        accept=".pdf,.docx"
+        label="Question Paper (Image)"
+        accept=".jpg,.jpeg,.png"
         onChange={setQuestionPaper}
       />
       <FileUpload
-        label="Grading Rubric"
-        accept=".pdf,.docx"
+        label="Grading Rubric (Image)"
+        accept=".jpg,.jpeg,.png"
         onChange={setGradingRubric}
       />
       <FileUpload
-        label="Handwritten Answer Sheet"
-        accept=".pdf,.jpg,.jpeg,.png"
+        label="Handwritten Answer Sheet (Image)"
+        accept=".jpg,.jpeg,.png"
         onChange={setAnswerSheet}
       />
       

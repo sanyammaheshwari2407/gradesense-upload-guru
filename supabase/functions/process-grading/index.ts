@@ -12,29 +12,26 @@ const truncateText = (text: string, maxLength = 2000) => {
   return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
 };
 
-async function extractTextFromPDF(client: vision.ImageAnnotatorClient, fileBytes: Uint8Array): Promise<string> {
+async function extractTextFromImage(client: vision.ImageAnnotatorClient, fileBytes: Uint8Array): Promise<string> {
   try {
-    console.log('Starting text extraction from file...');
+    console.log('Starting text extraction from image...');
     
-    // Convert Uint8Array to base64 using a more reliable method
-    const encoder = new TextEncoder();
-    const decoder = new TextDecoder();
-    const uint8Array = new Uint8Array(fileBytes);
-    const base64Content = btoa(decoder.decode(uint8Array));
-    
-    console.log('File converted to base64, sending to Vision API...');
-    
-    const [result] = await client.documentTextDetection({
-      image: { content: base64Content }
+    const [result] = await client.textDetection({
+      image: {
+        content: fileBytes
+      }
     });
+
+    const detections = result.textAnnotations;
     
-    if (!result.fullTextAnnotation?.text) {
-      console.warn('No text extracted from document');
+    if (!detections || detections.length === 0) {
+      console.warn('No text detected in image');
       return '';
     }
     
-    console.log('Text successfully extracted from document');
-    return result.fullTextAnnotation.text;
+    console.log('Text successfully extracted from image');
+    // The first annotation contains the entire text
+    return detections[0].description || '';
   } catch (error) {
     console.error('Error extracting text:', error);
     throw new Error(`Failed to extract text: ${error.message}`);
@@ -93,12 +90,12 @@ serve(async (req) => {
       throw new Error('Failed to download one or more required files')
     }
 
-    // Extract text from documents
-    console.log('Extracting text from documents...')
+    // Extract text from images
+    console.log('Extracting text from images...')
     const [questionPaperText, gradingRubricText, answerSheetText] = await Promise.all([
-      extractTextFromPDF(visionClient, questionPaperRes.data),
-      extractTextFromPDF(visionClient, gradingRubricRes.data),
-      extractTextFromPDF(visionClient, answerSheetRes.data)
+      extractTextFromImage(visionClient, questionPaperRes.data),
+      extractTextFromImage(visionClient, gradingRubricRes.data),
+      extractTextFromImage(visionClient, answerSheetRes.data)
     ]);
 
     // Store extracted text

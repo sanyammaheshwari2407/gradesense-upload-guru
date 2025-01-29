@@ -1,7 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1'
 import { GoogleGenerativeAI } from 'npm:@google/generative-ai'
-import vision from 'npm:@google-cloud/vision'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -12,25 +11,48 @@ const truncateText = (text: string, maxLength = 2000) => {
   return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
 };
 
-async function extractTextFromImage(client: vision.ImageAnnotatorClient, fileBytes: Uint8Array): Promise<string> {
+async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array): Promise<string> {
   try {
     console.log('Starting text extraction from image...');
     
-    const [result] = await client.textDetection({
-      image: {
-        content: fileBytes
-      }
+    const base64Image = btoa(String.fromCharCode(...fileBytes));
+    
+    const visionRequest = {
+      requests: [{
+        image: {
+          content: base64Image
+        },
+        features: [{
+          type: "TEXT_DETECTION",
+          maxResults: 1
+        }]
+      }]
+    };
+
+    const response = await fetch('https://vision.googleapis.com/v1/images:annotate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`
+      },
+      body: JSON.stringify(visionRequest)
     });
 
-    const detections = result.textAnnotations;
-    
-    if (!detections || detections.length === 0) {
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Vision API error:', errorText);
+      throw new Error(`Vision API error: ${response.status} ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('Vision API response received');
+
+    if (!result.responses?.[0]?.textAnnotations?.[0]?.description) {
       console.warn('No text detected in image');
       return '';
     }
     
-    console.log('Text successfully extracted from image');
-    return detections[0].description || '';
+    return result.responses[0].textAnnotations[0].description;
   } catch (error) {
     console.error('Error extracting text:', error);
     throw new Error(`Failed to extract text: ${error.message}`);
@@ -63,12 +85,6 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Initialize Vision API client
-    console.log('Initializing Vision API client...');
-    const visionClient = new vision.ImageAnnotatorClient({
-      credentials: JSON.parse(googleApiKey)
-    });
-
     // Fetch session details
     console.log('Fetching session details...');
     const { data: session, error: sessionError } = await supabase
@@ -96,9 +112,9 @@ serve(async (req) => {
     // Extract text from images
     console.log('Extracting text from images...');
     const [questionPaperText, gradingRubricText, answerSheetText] = await Promise.all([
-      extractTextFromImage(visionClient, questionPaperRes.data),
-      extractTextFromImage(visionClient, gradingRubricRes.data),
-      extractTextFromImage(visionClient, answerSheetRes.data)
+      extractTextFromImage(googleApiKey, questionPaperRes.data),
+      extractTextFromImage(googleApiKey, gradingRubricRes.data),
+      extractTextFromImage(googleApiKey, answerSheetRes.data)
     ]);
 
     // Store extracted text

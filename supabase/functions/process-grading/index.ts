@@ -7,53 +7,54 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-// Vision API specific functions
-async function callVisionAPI(apiKey: string, base64Image: string) {
-  console.log('Preparing Vision API request...');
+async function uploadToGCS(fileBytes: Uint8Array, fileName: string, mimeType: string): Promise<string> {
+  const bucketName = Deno.env.get('GOOGLE_CLOUD_BUCKET')!;
+  const gcsInputUri = `gs://${bucketName}/inputs/${fileName}`;
   
-  const visionRequest = {
-    requests: [{
-      image: {
-        content: base64Image
-      },
-      features: [{
-        type: "DOCUMENT_TEXT_DETECTION",  // Updated to use DOCUMENT_TEXT_DETECTION for better results
-        maxResults: 1
-      }],
-      imageContext: {
-        languageHints: ["en"]  // Optimize for English text
-      }
-    }]
-  };
-
-  console.log('Sending request to Vision API...');
-  const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    },
-    body: JSON.stringify(visionRequest)
-  });
-
-  if (!response.ok) {
-    const errorData = await response.json();
-    console.error('Vision API error:', errorData);
-    throw new Error(`Vision API error: ${response.status} ${JSON.stringify(errorData)}`);
-  }
-
-  return await response.json();
+  // Implementation of GCS upload will go here
+  // For now, we'll use the direct Vision API approach
+  return gcsInputUri;
 }
 
 async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array): Promise<{ text: string; confidence: number; rawResponse: any }> {
   try {
     console.log('Starting text extraction from image...');
     
-    // Convert Uint8Array to base64 string using Deno's encoder
+    // Convert Uint8Array to base64
     const base64Image = btoa(String.fromCharCode(...new Uint8Array(fileBytes)));
-    console.log('Image converted to base64');
     
-    const result = await callVisionAPI(apiKey, base64Image);
+    const visionRequest = {
+      requests: [{
+        image: {
+          content: base64Image
+        },
+        features: [{
+          type: "DOCUMENT_TEXT_DETECTION",
+          maxResults: 1
+        }],
+        imageContext: {
+          languageHints: ["en"]
+        }
+      }]
+    };
+
+    console.log('Sending request to Vision API...');
+    const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify(visionRequest)
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('Vision API error:', errorData);
+      throw new Error(`Vision API error: ${response.status} ${JSON.stringify(errorData)}`);
+    }
+
+    const result = await response.json();
     console.log('Vision API response received');
 
     const firstResponse = result.responses?.[0];
@@ -61,11 +62,9 @@ async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array): Prom
       throw new Error('No response data from Vision API');
     }
 
-    // Extract full text annotation for better accuracy
     const fullTextAnnotation = firstResponse.fullTextAnnotation;
     const text = fullTextAnnotation?.text || '';
     
-    // Calculate confidence score (average of page confidence scores)
     const confidence = fullTextAnnotation?.pages?.reduce((acc: number, page: any) => 
       acc + (page.confidence || 0), 0) / (fullTextAnnotation?.pages?.length || 1);
 
@@ -129,7 +128,6 @@ async function processGradingSession(supabase: any, sessionId: string, apiKey: s
 }
 
 serve(async (req) => {
-  // Handle CORS
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders })
   }
@@ -142,7 +140,6 @@ serve(async (req) => {
       throw new Error('No session ID provided');
     }
 
-    // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     const googleApiKey = Deno.env.get('GOOGLE_API_KEY');

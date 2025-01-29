@@ -12,30 +12,36 @@ export type Database = {
       extracted_texts: {
         Row: {
           answer_sheet_text: string | null
+          confidence_score: number | null
           created_at: string
           grading_rubric_text: string | null
           grading_session_id: string
           id: string
           question_paper_text: string | null
           updated_at: string
+          vision_api_response: Json | null
         }
         Insert: {
           answer_sheet_text?: string | null
+          confidence_score?: number | null
           created_at?: string
           grading_rubric_text?: string | null
           grading_session_id: string
           id?: string
           question_paper_text?: string | null
           updated_at?: string
+          vision_api_response?: Json | null
         }
         Update: {
           answer_sheet_text?: string | null
+          confidence_score?: number | null
           created_at?: string
           grading_rubric_text?: string | null
           grading_session_id?: string
           id?: string
           question_paper_text?: string | null
           updated_at?: string
+          vision_api_response?: Json | null
         }
         Relationships: [
           {

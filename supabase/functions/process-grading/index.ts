@@ -7,11 +7,45 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const truncateText = (text: string, maxLength = 2000) => {
-  return text.length > maxLength ? text.substring(0, maxLength) + "..." : text;
-};
+// Vision API specific functions
+async function callVisionAPI(apiKey: string, base64Image: string) {
+  console.log('Preparing Vision API request...');
+  
+  const visionRequest = {
+    requests: [{
+      image: {
+        content: base64Image
+      },
+      features: [{
+        type: "DOCUMENT_TEXT_DETECTION",  // Updated to use DOCUMENT_TEXT_DETECTION for better results
+        maxResults: 1
+      }],
+      imageContext: {
+        languageHints: ["en"]  // Optimize for English text
+      }
+    }]
+  };
 
-async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array): Promise<string> {
+  console.log('Sending request to Vision API...');
+  const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
+    body: JSON.stringify(visionRequest)
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    console.error('Vision API error:', errorData);
+    throw new Error(`Vision API error: ${response.status} ${JSON.stringify(errorData)}`);
+  }
+
+  return await response.json();
+}
+
+async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array): Promise<{ text: string; confidence: number; rawResponse: any }> {
   try {
     console.log('Starting text extraction from image...');
     
@@ -19,44 +53,79 @@ async function extractTextFromImage(apiKey: string, fileBytes: Uint8Array): Prom
     const base64Image = btoa(String.fromCharCode(...new Uint8Array(fileBytes)));
     console.log('Image converted to base64');
     
-    // Format request according to Vision API documentation
-    const visionRequest = {
-      requests: [{
-        image: {
-          content: base64Image
-        },
-        features: [{
-          type: "TEXT_DETECTION"
-        }]
-      }]
-    };
-
-    console.log('Sending request to Vision API...');
-    const response = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(visionRequest)
-    });
-
-    const result = await response.json();
+    const result = await callVisionAPI(apiKey, base64Image);
     console.log('Vision API response received');
 
-    if (!response.ok) {
-      throw new Error(`Vision API error: ${response.status} ${JSON.stringify(result, null, 2)}`);
+    const firstResponse = result.responses?.[0];
+    if (!firstResponse) {
+      throw new Error('No response data from Vision API');
     }
 
-    if (!result.responses?.[0]?.textAnnotations?.[0]?.description) {
-      console.warn('No text detected in image');
-      return '';
-    }
+    // Extract full text annotation for better accuracy
+    const fullTextAnnotation = firstResponse.fullTextAnnotation;
+    const text = fullTextAnnotation?.text || '';
     
-    return result.responses[0].textAnnotations[0].description;
+    // Calculate confidence score (average of page confidence scores)
+    const confidence = fullTextAnnotation?.pages?.reduce((acc: number, page: any) => 
+      acc + (page.confidence || 0), 0) / (fullTextAnnotation?.pages?.length || 1);
+
+    return {
+      text,
+      confidence,
+      rawResponse: result
+    };
   } catch (error) {
     console.error('Error extracting text:', error);
     throw new Error(`Failed to extract text: ${error.message}`);
   }
+}
+
+async function processGradingSession(supabase: any, sessionId: string, apiKey: string) {
+  console.log('Processing grading session:', sessionId);
+  
+  const { data: session, error: sessionError } = await supabase
+    .from('grading_sessions')
+    .select('*')
+    .eq('id', sessionId)
+    .single();
+
+  if (sessionError) throw new Error(`Session not found: ${sessionError.message}`);
+
+  // Download files
+  const [questionPaperRes, gradingRubricRes, answerSheetRes] = await Promise.all([
+    supabase.storage.from('question_papers').download(session.question_paper_path),
+    supabase.storage.from('grading_rubrics').download(session.grading_rubric_path),
+    supabase.storage.from('answer_sheets').download(session.answer_sheet_path)
+  ]);
+
+  // Process each document with Vision API
+  const [questionPaper, gradingRubric, answerSheet] = await Promise.all([
+    extractTextFromImage(apiKey, questionPaperRes.data),
+    extractTextFromImage(apiKey, gradingRubricRes.data),
+    extractTextFromImage(apiKey, answerSheetRes.data)
+  ]);
+
+  // Store extracted texts with Vision API responses
+  await supabase
+    .from('extracted_texts')
+    .insert({
+      grading_session_id: sessionId,
+      question_paper_text: questionPaper.text,
+      grading_rubric_text: gradingRubric.text,
+      answer_sheet_text: answerSheet.text,
+      vision_api_response: {
+        questionPaper: questionPaper.rawResponse,
+        gradingRubric: gradingRubric.rawResponse,
+        answerSheet: answerSheet.rawResponse
+      },
+      confidence_score: (questionPaper.confidence + gradingRubric.confidence + answerSheet.confidence) / 3
+    });
+
+  return {
+    questionPaper: questionPaper.text,
+    gradingRubric: gradingRubric.text,
+    answerSheet: answerSheet.text
+  };
 }
 
 serve(async (req) => {
@@ -66,15 +135,14 @@ serve(async (req) => {
   }
 
   try {
-    console.log('Processing grading request...')
-    const { sessionId } = await req.json()
-    console.log('Session ID:', sessionId)
+    const { sessionId } = await req.json();
+    console.log('Processing request for session:', sessionId);
 
     if (!sessionId) {
       throw new Error('No session ID provided');
     }
 
-    // Initialize clients and check environment variables
+    // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL');
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     const googleApiKey = Deno.env.get('GOOGLE_API_KEY');
@@ -85,89 +153,36 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // Fetch session details
-    console.log('Fetching session details...');
-    const { data: session, error: sessionError } = await supabase
-      .from('grading_sessions')
-      .select('*')
-      .eq('id', sessionId)
-      .single();
+    // Process the grading session
+    const extractedTexts = await processGradingSession(supabase, sessionId, googleApiKey);
 
-    if (sessionError || !session) {
-      throw new Error(`Session not found: ${sessionError?.message || 'No session data'}`);
-    }
-
-    // Download files
-    console.log('Downloading files...');
-    const [questionPaperRes, gradingRubricRes, answerSheetRes] = await Promise.all([
-      supabase.storage.from('question_papers').download(session.question_paper_path),
-      supabase.storage.from('grading_rubrics').download(session.grading_rubric_path),
-      supabase.storage.from('answer_sheets').download(session.answer_sheet_path)
-    ]);
-
-    if (!questionPaperRes.data || !gradingRubricRes.data || !answerSheetRes.data) {
-      throw new Error('Failed to download one or more required files');
-    }
-
-    // Extract text from images
-    console.log('Extracting text from images...');
-    const [questionPaperText, gradingRubricText, answerSheetText] = await Promise.all([
-      extractTextFromImage(googleApiKey, questionPaperRes.data),
-      extractTextFromImage(googleApiKey, gradingRubricRes.data),
-      extractTextFromImage(googleApiKey, answerSheetRes.data)
-    ]);
-
-    // Store extracted text
-    console.log('Storing extracted text...');
-    const { error: extractedTextError } = await supabase
-      .from('extracted_texts')
-      .insert({
-        grading_session_id: sessionId,
-        question_paper_text: questionPaperText,
-        grading_rubric_text: gradingRubricText,
-        answer_sheet_text: answerSheetText
-      });
-
-    if (extractedTextError) {
-      throw new Error(`Failed to store extracted text: ${extractedTextError.message}`);
-    }
-
-    // Process with Gemini API
-    console.log('Processing with Gemini API...');
+    // Initialize Gemini AI
     const genAI = new GoogleGenerativeAI(googleApiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-    // Truncate texts
-    const truncatedQuestionPaper = truncateText(questionPaperText);
-    const truncatedGradingRubric = truncateText(gradingRubricText);
-    const truncatedAnswerSheet = truncateText(answerSheetText);
+    // Generate grading feedback
+    const result = await model.generateContent(`
+      You are an expert grading assistant. Grade this answer based on:
 
-    console.log('Sending request to Gemini API...');
-    const result = await model.generateContent(`You are an expert grading assistant. Your task is to evaluate a student's answer based on the provided question paper and grading rubric.
+      Question Paper:
+      ${extractedTexts.questionPaper}
 
-Question Paper:
-${truncatedQuestionPaper}
+      Grading Rubric:
+      ${extractedTexts.gradingRubric}
 
-Grading Rubric:
-${truncatedGradingRubric}
+      Student's Answer:
+      ${extractedTexts.answerSheet}
 
-Student's Answer:
-${truncatedAnswerSheet}
+      Provide:
+      1. Brief Feedback (2-3 sentences)
+      2. Key Areas for Improvement (bullet points)
+      3. Overall Score (out of 100)
+    `);
 
-Please analyze the student's answer against the question paper and grading rubric. Provide:
+    const gradingResults = result.response.text();
 
-1. Brief Feedback (2-3 sentences): Evaluate how well the answer addresses the question requirements.
-2. Key Areas for Improvement: List specific points where the answer could be enhanced based on the rubric criteria.
-3. Overall Score (out of 100): Grade according to the rubric's scoring guidelines.
-
-Format your response exactly as shown above with these three numbered sections.`);
-
-    const response = await result.response;
-    const gradingResults = response.text();
-    console.log('Gemini API response received:', gradingResults);
-
-    // Update session
-    const { error: updateError } = await supabase
+    // Update session with feedback
+    await supabase
       .from('grading_sessions')
       .update({ 
         status: 'completed',
@@ -175,11 +190,6 @@ Format your response exactly as shown above with these three numbered sections.`
       })
       .eq('id', sessionId);
 
-    if (updateError) {
-      throw new Error(`Failed to update session: ${updateError.message}`);
-    }
-
-    console.log('Grading completed successfully');
     return new Response(
       JSON.stringify({
         message: 'Grading completed successfully',
@@ -191,13 +201,10 @@ Format your response exactly as shown above with these three numbered sections.`
   } catch (error) {
     console.error('Error processing grading:', error);
     return new Response(
-      JSON.stringify({ 
-        error: error.message,
-        details: error.stack
-      }),
+      JSON.stringify({ error: error.message }),
       { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
-        status: 500 
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        status: 500
       }
     );
   }

@@ -7,7 +7,6 @@ interface GradingFormProps {
     questionPaper: File;
     gradingRubric: File;
     answerSheet: File;
-    additionalFile?: File;
   }) => Promise<void>;
   isProcessing: boolean;
 }
@@ -16,7 +15,6 @@ export const GradingForm = ({ onSubmit, isProcessing }: GradingFormProps) => {
   const [questionPaper, setQuestionPaper] = useState<File | null>(null);
   const [gradingRubric, setGradingRubric] = useState<File | null>(null);
   const [answerSheet, setAnswerSheet] = useState<File | null>(null);
-  const [additionalFile, setAdditionalFile] = useState<File | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,14 +24,12 @@ export const GradingForm = ({ onSubmit, isProcessing }: GradingFormProps) => {
       questionPaper,
       gradingRubric,
       answerSheet,
-      additionalFile: additionalFile || undefined,
     });
 
     // Reset form after submission
     setQuestionPaper(null);
     setGradingRubric(null);
     setAnswerSheet(null);
-    setAdditionalFile(null);
   };
 
   return (
@@ -52,11 +48,6 @@ export const GradingForm = ({ onSubmit, isProcessing }: GradingFormProps) => {
         label="Handwritten Answer Sheet (Image)"
         accept=".jpg,.jpeg,.png"
         onChange={setAnswerSheet}
-      />
-      <FileUpload
-        label="Additional File (Optional)"
-        accept=".jpg,.jpeg,.png,.pdf,.doc,.docx"
-        onChange={setAdditionalFile}
       />
       
       <Button

@@ -54,7 +54,6 @@ const Index = () => {
     questionPaper: File;
     gradingRubric: File;
     answerSheet: File;
-    additionalFile?: File;
   }) => {
     setIsProcessing(true);
     
@@ -68,22 +67,11 @@ const Index = () => {
 
       console.log("Starting file uploads...");
       
-      const uploadPromises = [
+      const [questionPaperPath, gradingRubricPath, answerSheetPath] = await Promise.all([
         uploadFile(files.questionPaper, 'question_papers'),
         uploadFile(files.gradingRubric, 'grading_rubrics'),
         uploadFile(files.answerSheet, 'answer_sheets'),
-      ];
-
-      if (files.additionalFile) {
-        uploadPromises.push(uploadFile(files.additionalFile, 'additional_files'));
-      }
-
-      const [
-        questionPaperPath,
-        gradingRubricPath,
-        answerSheetPath,
-        additionalFilePath,
-      ] = await Promise.all(uploadPromises);
+      ]);
 
       console.log("Files uploaded successfully, creating grading session...");
       
@@ -93,7 +81,6 @@ const Index = () => {
           question_paper_path: questionPaperPath,
           grading_rubric_path: gradingRubricPath,
           answer_sheet_path: answerSheetPath,
-          additional_file_path: additionalFilePath,
           status: 'pending',
           user_id: user.id
         })
